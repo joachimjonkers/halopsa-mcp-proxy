@@ -1,0 +1,11 @@
+{
+  "name": "halopsa-mcp-proxy",
+  "version": "1.0.0",
+  "description": "Stdio MCP proxy for HaloPSA — works around SSE response parsing issues in Claude Code's HTTP transport",
+  "type": "module",
+  "main": "server.js",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.0",
+    "zod": "^3.25.0"
+  }
+}
