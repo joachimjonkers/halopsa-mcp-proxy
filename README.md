@@ -19,10 +19,12 @@ It auto-discovers whatever tools your HaloPSA endpoint exposes at startup (commo
 
 1. **Node.js** (recent LTS) — check with `node --version`.
 2. An **MCP client** (these instructions use [Claude Code](https://docs.anthropic.com/en/docs/claude-code)).
-3. Your **HaloPSA MCP endpoint URL** (looks like `https://<your-halopsa-instance>/api/mcp`).
-4. A **HaloPSA API key** (`X-Halo-Api-Key`) tied to your own account.
+3. Your **HaloPSA MCP endpoint URL** (looks like `https://<your-halopsa-instance>/api/mcp`). Enable it in HaloPSA under **Config > AI > "Enable the MCP Endpoint"**.
+4. Credentials — **either** of:
+   - **OAuth2 client credentials (recommended):** a **Client ID** + **Client Secret** from a HaloPSA API application (Config > Integrations > Halo API, authentication method "Client ID and Secret (Services)"). The proxy exchanges these for a Bearer token automatically.
+   - **A static API key** (`X-Halo-Api-Key`) — HaloPSA's fallback auth method, if your instance issues one.
 
-> The endpoint URL and API key are specific to your organization's HaloPSA instance. Get them from whoever administers your HaloPSA — they are **not** included in this repo.
+> The endpoint URL and credentials are specific to your organization's HaloPSA instance. Get them from whoever administers your HaloPSA — they are **not** included in this repo.
 
 ## Setup
 
@@ -32,17 +34,32 @@ cd halopsa-mcp-proxy
 npm install
 ```
 
-Register it with Claude Code (user scope = available in every project):
+Register it with Claude Code (user scope = available in every project).
+
+**With OAuth2 client credentials (recommended):**
 
 ```bash
 claude mcp add halopsa-proxy \
   --scope user \
-  -e HALO_API_KEY="<your-api-key>" \
   -e HALO_URL="<your-halopsa-mcp-endpoint>" \
+  -e HALO_CLIENT_ID="<your-client-id>" \
+  -e HALO_CLIENT_SECRET="<your-client-secret>" \
+  -- node "$PWD/server.js"
+```
+
+**Or with a static API key:**
+
+```bash
+claude mcp add halopsa-proxy \
+  --scope user \
+  -e HALO_URL="<your-halopsa-mcp-endpoint>" \
+  -e HALO_API_KEY="<your-api-key>" \
   -- node "$PWD/server.js"
 ```
 
 Run this from inside the cloned folder so `$PWD` resolves correctly. Then **restart Claude Code** so it picks up the new server.
+
+> **Token endpoint:** with client credentials the proxy requests a token from `<origin-of-HALO_URL>/auth/token` by default (e.g. `https://your-halopsa/api/mcp` → `https://your-halopsa/auth/token`). If your instance's authorisation server is on a different URL (check Config > Integrations > Halo API), set `-e HALO_AUTH_URL="..."`. If the token request is rejected for scope, set `-e HALO_SCOPE="..."` (default `all`).
 
 ### Letting Claude set it up for you
 
@@ -62,9 +79,15 @@ If it doesn't appear: check the path in the registration, that `npm install` fin
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `HALO_API_KEY` | yes | — | Your `X-Halo-Api-Key` value |
 | `HALO_URL` | yes | — | Your HaloPSA MCP endpoint, e.g. `https://<your-halopsa>/api/mcp` |
+| `HALO_CLIENT_ID` | one auth method required | — | OAuth2 client ID (recommended path) |
+| `HALO_CLIENT_SECRET` | with `HALO_CLIENT_ID` | — | OAuth2 client secret |
+| `HALO_API_KEY` | fallback auth method | — | Static `X-Halo-Api-Key` value (used only if client id/secret are absent) |
+| `HALO_AUTH_URL` | no | `<origin of HALO_URL>/auth/token` | OAuth2 token endpoint |
+| `HALO_SCOPE` | no | `all` | OAuth2 scope requested |
 | `HALO_TIMEOUT` | no | `60000` | Request timeout in ms |
+
+Provide **either** `HALO_CLIENT_ID` + `HALO_CLIENT_SECRET` (OAuth2, recommended) **or** `HALO_API_KEY` (static fallback).
 
 ## Removing it
 

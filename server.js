@@ -8,16 +8,18 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 // ── Config ──────────────────────────────────────────────────────────
-const HALO_API_KEY = process.env.HALO_API_KEY;
+// The MCP endpoint (e.g. https://<your-halopsa>/api/mcp)
 const HALO_URL = process.env.HALO_URL;
 const HALO_TIMEOUT = Number(process.env.HALO_TIMEOUT) || 60_000;
 
-if (!HALO_API_KEY) {
-  console.error(
-    "[halopsa-proxy] HALO_API_KEY environment variable is required."
-  );
-  process.exit(1);
-}
+// Auth — two supported methods:
+//   1. OAuth2 client credentials (recommended): HALO_CLIENT_ID + HALO_CLIENT_SECRET
+//      → the proxy fetches a Bearer token and refreshes it automatically.
+//   2. Static API key (fallback): HALO_API_KEY → sent as the X-Halo-Api-Key header.
+const HALO_CLIENT_ID = process.env.HALO_CLIENT_ID;
+const HALO_CLIENT_SECRET = process.env.HALO_CLIENT_SECRET;
+const HALO_API_KEY = process.env.HALO_API_KEY;
+const HALO_SCOPE = process.env.HALO_SCOPE || "all";
 
 if (!HALO_URL) {
   console.error(
@@ -25,6 +27,72 @@ if (!HALO_URL) {
       "(your HaloPSA MCP endpoint, e.g. https://<your-halopsa>/api/mcp)."
   );
   process.exit(1);
+}
+
+const useOAuth = Boolean(HALO_CLIENT_ID && HALO_CLIENT_SECRET);
+
+if (!useOAuth && !HALO_API_KEY) {
+  console.error(
+    "[halopsa-proxy] No credentials provided. Set either " +
+      "HALO_CLIENT_ID + HALO_CLIENT_SECRET (recommended) or HALO_API_KEY."
+  );
+  process.exit(1);
+}
+
+// Token endpoint. Defaults to <origin-of-HALO_URL>/auth/token, which is
+// correct for most HaloPSA instances. Override with HALO_AUTH_URL if your
+// authorisation server differs (see Config > Integrations > Halo API).
+const HALO_AUTH_URL =
+  process.env.HALO_AUTH_URL || new URL(HALO_URL).origin + "/auth/token";
+
+// ── OAuth2 token management ─────────────────────────────────────────
+let cachedToken = null;
+let tokenExpiresAt = 0; // epoch ms
+
+async function getAccessToken() {
+  // Refresh a minute before expiry to avoid edge-of-expiry failures.
+  if (cachedToken && Date.now() < tokenExpiresAt - 60_000) {
+    return cachedToken;
+  }
+
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: HALO_CLIENT_ID,
+    client_secret: HALO_CLIENT_SECRET,
+    scope: HALO_SCOPE,
+  });
+
+  const res = await fetch(HALO_AUTH_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+    signal: AbortSignal.timeout(HALO_TIMEOUT),
+  });
+
+  if (!res.ok) {
+    throw new Error(
+      `Token request to ${HALO_AUTH_URL} failed: HTTP ${res.status}: ${await res.text()}`
+    );
+  }
+
+  const json = await res.json();
+  if (!json.access_token) {
+    throw new Error(
+      `Token response from ${HALO_AUTH_URL} had no access_token: ${JSON.stringify(json).slice(0, 300)}`
+    );
+  }
+
+  cachedToken = json.access_token;
+  tokenExpiresAt = Date.now() + (Number(json.expires_in) || 3600) * 1000;
+  return cachedToken;
+}
+
+// Build the auth header for a request to the MCP endpoint.
+async function authHeaders() {
+  if (useOAuth) {
+    return { Authorization: `Bearer ${await getAccessToken()}` };
+  }
+  return { "X-Halo-Api-Key": HALO_API_KEY };
 }
 
 // ── SSE response parser ─────────────────────────────────────────────
@@ -73,7 +141,7 @@ async function proxyToHalo(method, params) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Halo-Api-Key": HALO_API_KEY,
+      ...(await authHeaders()),
     },
     body,
     signal: AbortSignal.timeout(HALO_TIMEOUT),
