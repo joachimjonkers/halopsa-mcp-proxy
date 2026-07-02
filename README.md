@@ -34,9 +34,37 @@ cd halopsa-mcp-proxy
 npm install
 ```
 
-Register it with Claude Code (user scope = available in every project).
+### Recommended: keep your secret in a `.env` file
 
-**With OAuth2 client credentials (recommended):**
+This keeps your client secret in a local file — **never** typed into a chat window or a command. The proxy reads a `.env` file sitting next to `server.js`.
+
+1. Create the file from the template:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Open `.env` in a text editor and fill in your values, then save:
+
+   ```
+   HALO_URL=<your-halopsa-mcp-endpoint>
+   HALO_CLIENT_ID=<your-client-id>
+   HALO_CLIENT_SECRET=<your-client-secret>
+   ```
+
+3. Register the proxy — note there are **no credentials in this command**:
+
+   ```bash
+   claude mcp add halopsa-proxy --scope user -- node "$PWD/server.js"
+   ```
+
+Run step 3 from inside the cloned folder so `$PWD` resolves correctly. Then **restart Claude Code**. `.env` is git-ignored, so your secret never gets committed.
+
+> If you're letting Claude Code do the setup for you, ask it to create `.env` from `.env.example` and register the server — **but fill in the secret yourself in a text editor**, and don't paste it into the chat. Anything typed into the chat is sent to the model.
+
+### Alternative: pass values on the command line
+
+If you prefer, you can pass everything via `-e` instead of a `.env` file (values passed this way take precedence over `.env`):
 
 ```bash
 claude mcp add halopsa-proxy \
@@ -47,27 +75,9 @@ claude mcp add halopsa-proxy \
   -- node "$PWD/server.js"
 ```
 
-**Or with a static API key:**
+Static API key instead of OAuth2? Swap the client id/secret for `-e HALO_API_KEY="<your-api-key>"` (or set `HALO_API_KEY` in `.env`).
 
-```bash
-claude mcp add halopsa-proxy \
-  --scope user \
-  -e HALO_URL="<your-halopsa-mcp-endpoint>" \
-  -e HALO_API_KEY="<your-api-key>" \
-  -- node "$PWD/server.js"
-```
-
-Run this from inside the cloned folder so `$PWD` resolves correctly. Then **restart Claude Code** so it picks up the new server.
-
-> **Token endpoint:** with client credentials the proxy requests a token from `<origin-of-HALO_URL>/auth/token` by default (e.g. `https://your-halopsa/api/mcp` → `https://your-halopsa/auth/token`). If your instance's authorisation server is on a different URL (check Config > Integrations > Halo API), set `-e HALO_AUTH_URL="..."`. If the token request is rejected for scope, set `-e HALO_SCOPE="..."` (default `all`).
-
-### Letting Claude set it up for you
-
-You can hand this README to Claude Code and say:
-
-> "Set up the HaloPSA MCP proxy following this README. My endpoint is `<url>` and my API key is `<key>`."
-
-It will run `npm install` and the `claude mcp add` command. You still restart the client yourself at the end.
+> **Token endpoint:** with client credentials the proxy requests a token from `<origin-of-HALO_URL>/auth/token` by default (e.g. `https://your-halopsa/api/mcp` → `https://your-halopsa/auth/token`). If your instance's authorisation server is on a different URL (check Config > Integrations > Halo API), set `HALO_AUTH_URL`. If the token request is rejected for scope, set `HALO_SCOPE` (default `all`).
 
 ## Verify
 

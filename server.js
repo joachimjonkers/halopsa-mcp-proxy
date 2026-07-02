@@ -6,6 +6,39 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+// ── Load .env next to this file ─────────────────────────────────────
+// Lets you keep credentials in a local .env file instead of passing them
+// on the command line. Real environment variables take precedence, so
+// this never overrides values passed via `claude mcp add -e ...`.
+function loadDotEnv() {
+  const envPath = join(dirname(fileURLToPath(import.meta.url)), ".env");
+  let text;
+  try {
+    text = readFileSync(envPath, "utf8");
+  } catch {
+    return; // no .env file — rely on real environment variables
+  }
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq === -1) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (!(key in process.env)) process.env[key] = value;
+  }
+}
+loadDotEnv();
 
 // ── Config ──────────────────────────────────────────────────────────
 // The MCP endpoint (e.g. https://<your-halopsa>/api/mcp)
