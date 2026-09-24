@@ -96,8 +96,14 @@ If it doesn't appear: check the path in the registration, that `npm install` fin
 | `HALO_AUTH_URL` | no | `<origin of HALO_URL>/auth/token` | OAuth2 token endpoint |
 | `HALO_SCOPE` | no | `all` | OAuth2 scope requested |
 | `HALO_TIMEOUT` | no | `60000` | Request timeout in ms |
+| `HALO_API_URL` | no | `<origin of HALO_URL>/api` | REST API base, used to fetch internal notes |
+| `HALO_INCLUDE_INTERNAL_NOTES` | no | `true` | Set to `false` to stop merging internal notes into `get_one_ticket` |
 
 Provide **either** `HALO_CLIENT_ID` + `HALO_CLIENT_SECRET` (OAuth2, recommended) **or** `HALO_API_KEY` (static fallback).
+
+### Internal notes
+
+HaloPSA's MCP `get_one_ticket` only returns the customer-visible conversation. The proxy also calls the REST API (`GET /api/actions?ticket_id=…`) with the same credentials and adds the agents' hidden notes to the result as `internal_notes` (`id`, `datetime`, `who`, `outcome`, `note`). If that call fails — e.g. the API application lacks REST read access — the ticket is still returned, with the reason in `internal_notes_error`.
 
 ## Removing it
 

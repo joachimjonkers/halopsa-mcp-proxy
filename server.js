@@ -128,6 +128,70 @@ async function authHeaders() {
   return { "X-Halo-Api-Key": HALO_API_KEY };
 }
 
+// ── Internal notes (REST API) ───────────────────────────────────────
+// Halo's MCP get_one_ticket only returns the customer-visible conversation.
+// Internal notes (actions with hiddenfromuser=true) are fetched from the
+// REST API and merged into the result. Defaults to <origin-of-HALO_URL>/api;
+// override with HALO_API_URL. Set HALO_INCLUDE_INTERNAL_NOTES=false to disable.
+const HALO_API_URL =
+  process.env.HALO_API_URL || new URL(HALO_URL).origin + "/api";
+const INCLUDE_INTERNAL_NOTES =
+  (process.env.HALO_INCLUDE_INTERNAL_NOTES || "true").toLowerCase() !== "false";
+
+function htmlToText(html) {
+  return html
+    .replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .trim();
+}
+
+async function fetchInternalNotes(ticketId) {
+  const url = `${HALO_API_URL}/actions?ticket_id=${encodeURIComponent(ticketId)}&excludesys=true`;
+  const res = await fetch(url, {
+    headers: await authHeaders(),
+    signal: AbortSignal.timeout(HALO_TIMEOUT),
+  });
+  if (!res.ok) {
+    throw new Error(`GET ${url} returned HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  }
+  const json = await res.json();
+  return (json.actions || [])
+    .filter((a) => a.hiddenfromuser)
+    .sort((a, b) => a.id - b.id)
+    .map((a) => ({
+      id: a.id,
+      datetime: a.datetime,
+      who: a.who,
+      outcome: a.outcome,
+      note: a.note || htmlToText(a.note_html || ""),
+    }));
+}
+
+// Merge internal notes into a get_one_ticket result (JSON in the first text block).
+async function withInternalNotes(result, ticketId) {
+  const block = result?.content?.find((c) => c.type === "text");
+  if (!block || ticketId == null) return result;
+  let ticket;
+  try {
+    ticket = JSON.parse(block.text);
+  } catch {
+    return result; // not JSON (e.g. an error message) — leave untouched
+  }
+  try {
+    ticket.internal_notes = await fetchInternalNotes(ticketId);
+  } catch (err) {
+    ticket.internal_notes_error = err.message;
+  }
+  block.text = JSON.stringify(ticket);
+  return result;
+}
+
 // ── SSE response parser ─────────────────────────────────────────────
 function parseSSEResponse(text) {
   // Try plain JSON first (in case HaloPSA drops SSE wrapping in the future)
@@ -205,6 +269,14 @@ async function discoverTools() {
   try {
     const result = await proxyToHalo("tools/list", {});
     cachedTools = result.tools || [];
+    if (INCLUDE_INTERNAL_NOTES) {
+      const t = cachedTools.find((t) => t.name === "get_one_ticket");
+      if (t) {
+        t.description =
+          (t.description || "") +
+          " The result also includes `internal_notes`: the agents' internal (hidden-from-customer) notes on the ticket, which are not part of `conversation`. Always take them into account when summarising or answering questions about a ticket.";
+      }
+    }
     console.error(
       `[halopsa-proxy] Discovered ${cachedTools.length} tools from ${HALO_URL}`
     );
@@ -240,6 +312,9 @@ async function main() {
         name,
         arguments: args,
       });
+      if (INCLUDE_INTERNAL_NOTES && name === "get_one_ticket" && !result?.isError) {
+        return await withInternalNotes(result, args?.ticket_id);
+      }
       return result;
     } catch (err) {
       return {
